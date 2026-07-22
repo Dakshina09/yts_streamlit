@@ -221,16 +221,55 @@ if st.button("Convert playlist ▶", type="primary", disabled=not (playlist_url 
         progress.progress((i + 1) / len(videos))
         time.sleep(0.05)  # gentle pacing to avoid rate limits
 
-    # Create the playlist and add tracks
-    with st.spinner("Creating Spotify playlist..."):
-        new_playlist = sp.user_playlist_create(
-            user=current_user["id"],
-            name=new_playlist_name,
-            public=not make_private,
-            description="Converted from a YouTube playlist",
+    # Create the playlist and add tracks.
+    # NOTE: Spotify deprecated POST /v1/users/{user_id}/playlists (the endpoint
+    # spotipy's user_playlist_create still uses) in its Feb 2026 API migration.
+    # It now returns 403 Forbidden for every caller. We call the current
+    # replacement, POST /v1/me/playlists, directly instead.
+    try:
+        with st.spinner("Creating Spotify playlist..."):
+            headers = {
+                "Authorization": f"Bearer {token_info['access_token']}",
+                "Content-Type": "application/json",
+            }
+            create_resp = requests.post(
+                "https://api.spotify.com/v1/me/playlists",
+                headers=headers,
+                json={
+                    "name": new_playlist_name,
+                    "public": not make_private,
+                    "description": "Converted from a YouTube playlist",
+                },
+                timeout=15,
+            )
+            if create_resp.status_code not in (200, 201):
+                raise RuntimeError(
+                    f"HTTP {create_resp.status_code} creating playlist: {create_resp.text}"
+                )
+            new_playlist = create_resp.json()
+
+            for chunk_start in range(0, len(matched_uris), 100):
+                chunk = matched_uris[chunk_start:chunk_start + 100]
+                add_resp = requests.post(
+                    f"https://api.spotify.com/v1/playlists/{new_playlist['id']}/tracks",
+                    headers=headers,
+                    json={"uris": chunk},
+                    timeout=15,
+                )
+                if add_resp.status_code not in (200, 201):
+                    raise RuntimeError(
+                        f"HTTP {add_resp.status_code} adding tracks: {add_resp.text}"
+                    )
+    except Exception as e:
+        st.error(
+            f"Error creating the Spotify playlist: {e}\n\n"
+            "If this mentions the User Management allowlist or scopes, try "
+            "logging out and back in below."
         )
-        for chunk_start in range(0, len(matched_uris), 100):
-            sp.playlist_add_items(new_playlist["id"], matched_uris[chunk_start:chunk_start + 100])
+        if st.button("Log out and try again"):
+            st.session_state.token_info = None
+            st.rerun()
+        st.stop()
 
     st.success(
         f"Done! Matched {len(matched_uris)} of {len(videos)} tracks. "
