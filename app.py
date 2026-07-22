@@ -251,7 +251,7 @@ if st.button("Convert playlist ▶", type="primary", disabled=not (playlist_url 
             for chunk_start in range(0, len(matched_uris), 100):
                 chunk = matched_uris[chunk_start:chunk_start + 100]
                 add_resp = requests.post(
-                    f"https://api.spotify.com/v1/playlists/{new_playlist['id']}/tracks",
+                    f"https://api.spotify.com/v1/playlists/{new_playlist['id']}/items",
                     headers=headers,
                     json={"uris": chunk},
                     timeout=15,
